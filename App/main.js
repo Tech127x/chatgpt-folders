@@ -213,6 +213,17 @@
     }
 
     function findHistoryContainer() {
+        // ChatGPT current sidebar (2026): conversations are listitems
+        // inside a semantic role="list" container.
+        const chatLink = document.querySelector('a[href^="/c/"]');
+        if (chatLink) {
+            const listItem = chatLink.closest('[role="listitem"]');
+            const list = listItem ? listItem.parentElement : null;
+            if (list && list.getAttribute("role") === "list") {
+                return list;
+            }
+        }
+
         const selectors = [
             "#history",
             '[data-testid="conversation-sidebar-list"]',
@@ -464,6 +475,17 @@
 
     function getRootChatLinks() {
         if (!historyDiv) return [];
+
+        // ChatGPT current sidebar (2026): each conversation is represented
+        // by a /c/ anchor nested inside a role="listitem".
+        const currentLinks = Array.from(
+            historyDiv.querySelectorAll(':scope > [role="listitem"] a[href^="/c/"]')
+        );
+        if (currentLinks.length) {
+            return currentLinks;
+        }
+
+        // Legacy ChatGPT layout fallback.
         return Array.from(historyDiv.children).filter(el =>
             el.matches("a.__menu-item")
         );
@@ -476,13 +498,33 @@
         historyManager.ensureChatOrderFromLinks(links);
 
         links.forEach(link => {
-            if (link.__glynChatItem) return;
+            // Current ChatGPT: use the semantic listitem as the native drag
+            // surface. The nested anchor remains the source of href/title and
+            // continues to handle normal chat navigation.
+            const currentRow = link.closest('[role="listitem"]');
+            const dragEl = currentRow || link;
+
+            if (dragEl.__glynChatItem) return;
+
             const href = link.getAttribute("href") || "";
             if (!href) return;
+
             const title = link.innerText.trim();
-            const item = new ChatItem(link, href, title);
+            const item = new ChatItem(dragEl, href, title);
+
+            // Keep the item discoverable from both the draggable surface and
+            // the conversation anchor for compatibility with existing code.
+            dragEl.__glynChatItem = item;
             link.__glynChatItem = item;
+
+            // Prevent Chromium from starting its native link drag; the row is
+            // the intentional draggable surface on current ChatGPT.
+            if (dragEl !== link) {
+                link.setAttribute("draggable", "false");
+            }
+
             item.enableDrag();
+
             if (layoutState && typeof layoutState.tryHydrateChat === "function") {
                 layoutState.tryHydrateChat(item);
             }
