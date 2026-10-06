@@ -517,13 +517,30 @@
             dragEl.__glynChatItem = item;
             link.__glynChatItem = item;
 
-            // Prevent Chromium from starting its native link drag; the row is
-            // the intentional draggable surface on current ChatGPT.
-            if (dragEl !== link) {
-                link.setAttribute("draggable", "false");
-            }
+            // Native HTML drag-and-drop on current ChatGPT conversation rows
+            // is unreliable across Chromium and Firefox. Keep the row and
+            // anchor out of native DnD; an extension-owned handle will be
+            // the interaction surface.
+            dragEl.setAttribute("draggable", "false");
+            link.setAttribute("draggable", "false");
 
-            item.enableDrag();
+            if (dragEl !== link && !dragEl.querySelector(":scope > .glyn-chat-drag-handle")) {
+                const handle = document.createElement("button");
+                handle.type = "button";
+                handle.className = "glyn-chat-drag-handle";
+                handle.setAttribute("aria-label", "Move conversation");
+                handle.setAttribute("title", "Move conversation");
+                handle.setAttribute("tabindex", "-1");
+                handle.innerHTML = "⋮⋮";
+
+                // DnD-1: visual affordance only.
+                handle.addEventListener("click", evt => {
+                    evt.preventDefault();
+                    evt.stopPropagation();
+                });
+
+                dragEl.appendChild(handle);
+            }
 
             if (layoutState && typeof layoutState.tryHydrateChat === "function") {
                 layoutState.tryHydrateChat(item);

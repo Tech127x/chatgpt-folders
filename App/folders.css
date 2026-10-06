@@ -243,3 +243,43 @@ html:not(.glyn-sidebar-handle-visible) #glyn-sidebar-resizer::after {
   color: rgba(255, 255, 255, 0.65);
   background: rgba(255, 255, 255, 0.05);
 }
+
+/* Current ChatGPT conversation drag handle.
+   DnD-1: visual affordance only; pointer behaviour is added separately. */
+[role="listitem"] {
+    position: relative;
+}
+
+.glyn-chat-drag-handle {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: currentColor;
+    font: inherit;
+    line-height: 1;
+    cursor: grab;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+}
+
+[role="listitem"]:hover > .glyn-chat-drag-handle,
+[role="listitem"]:focus-within > .glyn-chat-drag-handle {
+    opacity: 0.65;
+    pointer-events: auto;
+}
+
+.glyn-chat-drag-handle:hover {
+    opacity: 1;
+    background: rgba(128, 128, 128, 0.18);
+}
