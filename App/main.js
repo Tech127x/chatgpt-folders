@@ -471,6 +471,111 @@
         }
     }
 
+    // ---- pointer-driven chat drag helpers ----
+
+    const POINTER_DRAG_THRESHOLD = 5;
+    let pointerDrag = null;
+
+    function getFolderRowAtPoint(clientX, clientY) {
+        const hit = document.elementFromPoint(clientX, clientY);
+        return hit ? hit.closest(".glyn-folder-row") : null;
+    }
+
+    function clearPointerDragTarget() {
+        if (!pointerDrag || !pointerDrag.targetRow) return;
+        unhighlightFolderRow(pointerDrag.targetRow);
+        pointerDrag.targetRow = null;
+    }
+
+    function onChatHandlePointerMove(evt) {
+        if (!pointerDrag || evt.pointerId !== pointerDrag.pointerId) return;
+
+        const dx = evt.clientX - pointerDrag.startX;
+        const dy = evt.clientY - pointerDrag.startY;
+
+        if (!pointerDrag.active) {
+            if (Math.hypot(dx, dy) < POINTER_DRAG_THRESHOLD) return;
+            pointerDrag.active = true;
+        }
+
+        evt.preventDefault();
+
+        const row = getFolderRowAtPoint(evt.clientX, evt.clientY);
+        if (row === pointerDrag.targetRow) return;
+
+        clearPointerDragTarget();
+
+        if (row) {
+            pointerDrag.targetRow = row;
+            highlightFolderRow(row);
+        }
+    }
+
+    function finishChatHandlePointerDrag(evt, cancelled) {
+        if (!pointerDrag || evt.pointerId !== pointerDrag.pointerId) return;
+
+        const drag = pointerDrag;
+        const targetRow = drag.targetRow;
+
+        if (targetRow) {
+            unhighlightFolderRow(targetRow);
+        }
+
+        pointerDrag = null;
+
+        if (drag.handle.hasPointerCapture &&
+            drag.handle.hasPointerCapture(evt.pointerId)) {
+            drag.handle.releasePointerCapture(evt.pointerId);
+        }
+
+        if (!cancelled && drag.active) {
+            const folderItem = targetRow ? targetRow.__glynFolderItem : null;
+            console.log("[GlynGPT][PointerDnD] dry-run", {
+                source: drag.chatItem.id,
+                targetFolder: folderItem ? folderItem.id : null,
+                targetName: folderItem && folderItem.data
+                    ? folderItem.data.name
+                    : null
+            });
+        }
+    }
+
+    function onChatHandlePointerUp(evt) {
+        finishChatHandlePointerDrag(evt, false);
+    }
+
+    function onChatHandlePointerCancel(evt) {
+        finishChatHandlePointerDrag(evt, true);
+    }
+
+    function bindChatPointerHandle(handle, chatItem) {
+        if (!handle || handle.__glynPointerDnDBound) return;
+        handle.__glynPointerDnDBound = true;
+
+        handle.addEventListener("pointerdown", evt => {
+            if (evt.button !== 0 || pointerDrag) return;
+
+            evt.preventDefault();
+            evt.stopPropagation();
+
+            pointerDrag = {
+                pointerId: evt.pointerId,
+                startX: evt.clientX,
+                startY: evt.clientY,
+                active: false,
+                targetRow: null,
+                handle,
+                chatItem
+            };
+
+            handle.setPointerCapture(evt.pointerId);
+        });
+
+        handle.addEventListener("pointermove", onChatHandlePointerMove);
+        handle.addEventListener("pointerup", onChatHandlePointerUp);
+        handle.addEventListener("pointercancel", onChatHandlePointerCancel);
+    }
+
     // ---- root chat helpers ----
 
     function getRootChatLinks() {
@@ -539,6 +644,7 @@
                     evt.stopPropagation();
                 });
 
+                bindChatPointerHandle(handle, item);
                 dragEl.appendChild(handle);
             }
 
