@@ -275,6 +275,11 @@
       }
     }
 
+    _wrapperContainsChats(node) {
+      if (!node || typeof node.querySelector !== "function") return false;
+      return !!node.querySelector('a.__menu-item, [role="listitem"] a[href^="/c/"]');
+    }
+
     removeDuplicateWrappers() {
       if (!this.historyDiv) return;
       const allWrappers = Array.from(this.historyDiv.querySelectorAll(".glyn-folder-wrapper"));
@@ -284,10 +289,13 @@
         if (!id) return;
         const record = this.getRecordById(id);
         if (!record) {
+          // Preserve chats over cosmetic cleanup.
+          if (this._wrapperContainsChats(node)) return;
           node.remove();
           return;
         }
         if (record.wrapperEl !== node) {
+          if (this._wrapperContainsChats(node)) return;
           node.remove();
         }
       });
@@ -405,6 +413,10 @@
     }
 
     getRootChatLinks() {
+      const currentLinks = Array.from(this.historyDiv.querySelectorAll(
+        ':scope > [role="listitem"] a[href^="/c/"]'
+      ));
+      if (currentLinks.length) return currentLinks;
       return Array.from(this.historyDiv.children).filter(el =>
         el.matches("a.__menu-item")
       );

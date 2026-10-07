@@ -61,9 +61,26 @@
             const rawEntries = Array.isArray(rootPayload.ch) ? rootPayload.ch : [];
             const entries = rawEntries.filter((entry) => entry && entry.t === "f");
             if (folderPayloadMap && folderPayloadMap.size) {
-                const missing = new Set(Array.from(folderPayloadMap.keys()));
-                entries.forEach((entry) => missing.delete(entry.i));
-                missing.forEach((id) => entries.push({ t: "f", i: id }));
+                // f0.ch defines explicit root placement; f0.fi is the global
+                // index of every folder. Folders reachable through any ch entry
+                // (including transitively) are already placed and must not be
+                // promoted to roots; only unclaimed folders fall back to root.
+                const claimed = new Set();
+                const claimEntry = (entry) => {
+                    if (!entry || entry.t !== "f") return;
+                    const id = this._folderNumberFromId(entry.i);
+                    if (claimed.has(id)) return;
+                    claimed.add(id);
+                    const payload = folderPayloadMap.get(id);
+                    const children = payload && Array.isArray(payload.ch) ? payload.ch : [];
+                    children.forEach(claimEntry);
+                };
+                entries.forEach(claimEntry);
+                folderPayloadMap.forEach((_payload, id) => {
+                    if (claimed.has(id)) return;
+                    entries.push({ t: "f", i: id });
+                    claimEntry({ t: "f", i: id });
+                });
             }
 
             console.info("[GlynGPT][Layout] Restoring folders", JSON.stringify({
@@ -72,12 +89,14 @@
             }));
 
             const chatMap = this._collectChatMap();
+            const appliedFolders = new Set();
             this._applyEntries(
                 entries,
                 this.folderManager.historyDiv,
                 null,
                 folderPayloadMap,
-                chatMap
+                chatMap,
+                appliedFolders
             );
             console.info("[GlynGPT][Layout] After apply entries, folder count:", this.folderManager.folders.length);
             if (!this.folderManager.folders.length && folderPayloadMap && folderPayloadMap.size) {
@@ -90,7 +109,8 @@
                     this.folderManager.historyDiv,
                     null,
                     folderPayloadMap,
-                    chatMap
+                    chatMap,
+                    appliedFolders
                 );
                 console.warn("[GlynGPT][Layout] Fallback applied. Folder count:", this.folderManager.folders.length);
             }
@@ -119,7 +139,7 @@
             const scope = this.folderManager && this.folderManager.historyDiv
                 ? this.folderManager.historyDiv
                 : document;
-            const links = Array.from(scope.querySelectorAll("a.__menu-item"));
+            const links = Array.from(scope.querySelectorAll('a.__menu-item, [role="listitem"] a[href^="/c/"]'));
             const map = new Map();
             links.forEach((link) => {
                 const href = link.getAttribute("href") || "";
@@ -130,7 +150,7 @@
             return map;
         }
 
-        _applyEntries(entries, containerEl, parentFolder, folderPayloadMap, chatMap) {
+        _applyEntries(entries, containerEl, parentFolder, folderPayloadMap, chatMap, appliedFolders) {
             if (!Array.isArray(entries) || !containerEl) return;
 
             entries.forEach((entry) => {
@@ -143,7 +163,11 @@
                         this._registerPendingChat(entry.i, containerEl, parentFolder);
                         return;
                     }
-                    containerEl.appendChild(link);
+                    // Keep the current ChatGPT row (including grip) intact.
+                    const chatEl = link.__glynChatItem
+                        ? link.__glynChatItem.el
+                        : link.closest('[role="listitem"]') || link;
+                    containerEl.appendChild(chatEl);
                     if (parentFolder && link.__glynChatItem) {
                         parentFolder.addChild(link.__glynChatItem);
                     }
@@ -153,6 +177,11 @@
                 if (entry.t === "f") {
                     const folderPayload = folderPayloadMap.get(entry.i);
                     if (!folderPayload) return;
+                    // One logical folder id may be materialized at most once per
+                    // restore, regardless of how the payload graph references it.
+                    const folderKey = this._folderNumberFromId(entry.i);
+                    if (appliedFolders && appliedFolders.has(folderKey)) return;
+                    if (appliedFolders) appliedFolders.add(folderKey);
                     const folderId = this._folderIdFromNumber(entry.i);
                     console.debug("[GlynGPT][Layout] Creating folder", folderPayload.n || "Folder", {
                         id: folderId,
@@ -181,7 +210,7 @@
                         folder.refreshChevron();
                     }
                     const children = Array.isArray(folderPayload.ch) ? folderPayload.ch : [];
-                    this._applyEntries(children, folder.contentsEl, folder, folderPayloadMap, chatMap);
+                    this._applyEntries(children, folder.contentsEl, folder, folderPayloadMap, chatMap, appliedFolders);
                 }
             });
         }
@@ -257,6 +286,7 @@
         async save() {
             if (!this.storage) return false;
             const snapshot = this._buildSnapshot();
+            this._mergePendingAssignments(snapshot);
             const setObj = {};
             const removals = [];
 
@@ -284,9 +314,33 @@
             return true;
         }
 
+        // Restored chats still waiting for their sidebar row are represented by
+        // a placeholder, which _serializeContainer cannot see. Keep their
+        // folder assignments in the snapshot until tryHydrateChat() re-attaches
+        // the row; otherwise any save in between erases the assignment.
+        _mergePendingAssignments(snapshot) {
+            if (!snapshot || !snapshot.folders || !this.pendingAssignments ||
+                !this.pendingAssignments.size) {
+                return;
+            }
+            this.pendingAssignments.forEach((pending, compactId) => {
+                if (!pending || !compactId) return;
+                const folder = pending.parentFolder;
+                if (!folder || !folder.id) return;
+                const payload = snapshot.folders.get(this._folderNumberFromId(folder.id));
+                if (!payload) return;
+                const entries = Array.isArray(payload.ch) ? payload.ch : [];
+                if (!entries.some(entry => entry && entry.t === "c" && entry.i === compactId)) {
+                    entries.push({ t: "c", i: compactId });
+                    payload.ch = entries;
+                }
+            });
+        }
+
         _buildSnapshot() {
             const folderMap = new Map();
             const folderIds = new Set();
+            const seenFolders = new Set();
             const topLevel = this._serializeContainer(
                 this.folderManager ? this.folderManager.historyDiv : null,
                 folderMap,
@@ -294,7 +348,7 @@
                 {
                     includeChats: false,
                     preventDuplicates: true,
-                    seenFolders: new Set()
+                    seenFolders
                 }
             );
             const rootPayload = {};
@@ -340,7 +394,11 @@
                         folder.contentsEl,
                         folderMap,
                         folderIds,
-                        { includeChats: true }
+                        {
+                            includeChats: true,
+                            preventDuplicates: true,
+                            seenFolders
+                        }
                     );
                     if (childEntries.length) {
                         payload.ch = childEntries;
@@ -349,8 +407,14 @@
                     entries.push({ t: "f", i: idNum });
                     return;
                 }
-                if (includeChats && node.matches && node.matches("a.__menu-item")) {
-                    const href = node.getAttribute("href") || "";
+                const chatItem = node.__glynChatItem;
+                const chatLink = node.matches && node.matches("a.__menu-item")
+                    ? node
+                    : node.matches && node.matches('[role="listitem"]')
+                        ? node.querySelector('a[href^="/c/"]')
+                        : null;
+                if (includeChats && chatLink) {
+                    const href = chatItem ? chatItem.id : chatLink.getAttribute("href") || "";
                     if (href) {
                         const chatId = this._compactChatId(href);
                         if (chatId) {

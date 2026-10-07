@@ -22,6 +22,35 @@
       ) || null;
     }
 
+    // DnD-2B: the pointer grip may only append a current root chat to a folder.
+    moveRootChatToFolder(folderItem, chatItem) {
+      const manager = this.folderManager;
+      const history = this.historyManager;
+      if (!manager || !history || !this.historyDiv ||
+          !chatItem || chatItem.type !== "chat" || !chatItem.el ||
+          chatItem.el.parentNode !== this.historyDiv ||
+          this.findFolderRecordForChatEl(chatItem.el) ||
+          !folderItem || folderItem.type !== "folder" ||
+          !folderItem.contentsEl || !folderItem.el ||
+          !this.historyDiv.contains(folderItem.el) ||
+          !manager.getRecordByFolderItem(folderItem)) {
+        return false;
+      }
+
+      // Existing change handlers can save immediately. Notify only once the
+      // root order, folder children and DOM all describe the completed move.
+      history.suspendNotifications();
+      manager.suspendNotifications();
+      try {
+        this.moveChatToFolder(folderItem, chatItem, null);
+      } finally {
+        manager.resumeNotifications();
+        history.resumeNotifications();
+      }
+      manager.triggerChange("folder-children");
+      return true;
+    }
+
     // Move a chat (ChatItem) into a folder (FolderItem), from root or from another folder
     moveChatToFolder(folderItem, chatItem, beforeChatItem) {
       if (!folderItem || !chatItem) return;

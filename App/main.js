@@ -515,12 +515,11 @@
         if (!pointerDrag || evt.pointerId !== pointerDrag.pointerId) return;
 
         const drag = pointerDrag;
-        const targetRow = drag.targetRow;
+        const targetRow = !cancelled && drag.active
+            ? getFolderRowAtPoint(evt.clientX, evt.clientY)
+            : null;
 
-        if (targetRow) {
-            unhighlightFolderRow(targetRow);
-        }
-
+        clearPointerDragTarget();
         pointerDrag = null;
 
         if (drag.handle.hasPointerCapture &&
@@ -530,7 +529,10 @@
 
         if (!cancelled && drag.active) {
             const folderItem = targetRow ? targetRow.__glynFolderItem : null;
-            console.log("[GlynGPT][PointerDnD] dry-run", {
+            const moved = !!(dragController &&
+                dragController.moveRootChatToFolder(folderItem, drag.chatItem));
+            console.log("[GlynGPT][PointerDnD] root-to-folder", {
+                moved,
                 source: drag.chatItem.id,
                 targetFolder: folderItem ? folderItem.id : null,
                 targetName: folderItem && folderItem.data
@@ -657,7 +659,6 @@
     function observeHistory() {
         makeRootLinksDraggable();
         enforceFoldersTopOrder();
-        observeHistory();
 
         if (historyObserver) {
             historyObserver.disconnect();

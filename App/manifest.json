@@ -1,5 +1,10 @@
 {
   "manifest_version": 3,
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "chatgpt-folders@tech127x"
+    }
+  },
   "name": "ChatGPT Folders",
   "version": "1.0.1",
   "description": "Reorder ChatGPT conversations and organise into folders.",
